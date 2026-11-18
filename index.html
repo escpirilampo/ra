@@ -59,6 +59,9 @@
   .cartao .ac button, .folha .bt button { flex: 1; height: 42px; border-radius: 12px; border: 1.5px solid #D6D0C4; background: #fff; font: 600 14px inherit; font-family: inherit; color: var(--texto); }
   .estado { display: flex; align-items: center; justify-content: space-between; margin: 10px 16px 0; font-size: 15px; font-weight: 700; }
   .vidas { display: inline-flex; gap: 4px; align-items: center; }
+  .hud { position: absolute; left: 50%; top: calc(14px + env(safe-area-inset-top)); transform: translateX(-50%); display: none; gap: 14px; align-items: center; padding: 8px 16px; border-radius: 20px; background: rgba(255,255,255,.94); font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(0,0,0,.25); white-space: nowrap; }
+  model-viewer[ar-status="session-started"] .hud, model-viewer[ar-status="object-placed"] .hud { display: flex; }
+  model-viewer .aviso { top: calc(66px + env(safe-area-inset-top)); }
   .vidas svg { width: 24px; height: 24px; }
   .folha { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; max-width: 760px; margin: 0 auto; background: #fff; border-radius: 24px 24px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.2); padding: 12px 16px calc(18px + env(safe-area-inset-bottom)); }
   .folha .pega { width: 44px; height: 5px; border-radius: 3px; background: #D6D0C4; margin: 0 auto 10px; }
@@ -151,12 +154,13 @@
       '<h1 style="margin-top:4px">' + titulo + '</h1><p class="sub">' + (jogo ? 'Toque numa peça e escolha o nome' : 'Escolha os sistemas · toque numa peça para ver o nome') + '</p>' +
       (jogo ? '<div class="estado"><span class="conta"></span><span class="vidas" aria-label="Vidas"></span></div>' : '') +
       '<div class="cena"><model-viewer src="m/corpo/inteiro.glb" alt="Corpo humano" camera-controls touch-action="pan-y" shadow-intensity="0" exposure="1.05" environment-image="neutral"' +
-        ' min-camera-orbit="auto auto 0.2m" camera-orbit="0deg 82deg auto" interpolation-decay="120"' +
+        ' min-camera-orbit="auto auto 0.2m" camera-orbit="0deg 82deg auto" disable-tap interpolation-decay="120"' +
         ' ar ar-modes="webxr scene-viewer quick-look" ar-scale="auto" ar-placement="floor" interaction-prompt="none">' +
         '<button slot="ar-button" class="ar" type="button">' + AR + 'Ver na sala</button>' +
-        '<div class="carga" slot="progress-bar"></div></model-viewer>' +
+        '<div class="carga" slot="progress-bar"></div>' + (jogo ? '<div class="hud"><span class="conta"></span><span class="vidas"></span></div>' : '') + '</model-viewer>' +
         (jogo ? '' : '<div class="tg"><button type="button" data-a="nomes" aria-pressed="false">Nomes</button></div>') + '</div>' +
-      '<div class="chips">' + I.sistemas.map((k) => '<button type="button" data-sis="' + k + '" aria-pressed="false">' + NOMES_SIS[k] + '</button>').join('') + '</div>' +
+      (jogo ? '' : '<div class="chips">' + I.sistemas.map((k) => '<button type="button" data-sis="' + k + '" aria-pressed="false">' + NOMES_SIS[k] + '</button>').join('') + '</div>') +
+      (jogo ? '<p class="desc">Também pode jogar <b>na sala</b>: toque em «Ver na sala», ponha o corpo no chão e toque nas peças. Funciona no Android (Chrome); no iPhone o jogo faz-se aqui no ecrã.</p>' : '') +
       '<div class="cartao" hidden></div>' +
       '<div class="sem-ar" hidden></div>' +
       '<p class="fonte">' + esc(CORPO_FONTE) + '<br><a href="./">Ver todos os modelos</a></p>';
@@ -170,8 +174,8 @@
     const escondidas = new Uint8Array(N);   // peças tiradas pelo aluno («Esconder», «Só esta peça»)
     const soJogo = new Set();               // sistemas que só mostram as peças do jogo
     if (jogo) {
-      leg.forEach((a) => { const x = I.alvos[a]; ligados.add(x.sis); if (SIS_CONJ[x.c] !== x.sis) soJogo.add(x.sis); });
-      leg.forEach((a) => { const x = I.alvos[a]; if (SIS_CONJ[x.c] === x.sis) soJogo.delete(x.sis); });
+      // No jogo só se veem as peças que o professor escolheu (o aluno não junta outras).
+      leg.forEach((a) => { const x = I.alvos[a]; ligados.add(x.sis); soJogo.add(x.sis); });
     } else ['esqueleto', 'visceras', 'circulatorio'].forEach((k) => ligados.add(k));
     const doJogo = new Uint8Array(N); leg.forEach((a) => I.alvos[a].pecas.forEach((gi) => { doJogo[gi] = 1; }));
 
@@ -250,10 +254,22 @@
       setTimeout(arrumar, 60);
     }
 
+    // Na sala (realidade aumentada do Chrome) só aparece o que está dentro do model-viewer: as caixas do jogo
+    // passam para lá enquanto dura a sessão. Tocar nelas não mexe no modelo (beforexrselect).
+    let emAR = false;
+    const raiz = () => (emAR ? mv : document.body);
+    function caixa(el) { el.addEventListener('beforexrselect', (e) => e.preventDefault()); raiz().appendChild(el); return el; }
+    mv.addEventListener('ar-status', (e) => {
+      const st = e.detail.status;
+      const antes = emAR;
+      emAR = st === 'session-started' || st === 'object-placed';
+      if (antes !== emAR) document.querySelectorAll('.folha, .aviso, .fim').forEach((el) => raiz().appendChild(el));
+    });
+
     let avisoT = 0;
     function aviso(txt, tipo, ms) {
       let a = document.querySelector('.aviso');
-      if (!a) { a = document.createElement('div'); a.className = 'aviso'; a.setAttribute('role', 'status'); document.body.appendChild(a); }
+      if (!a) { a = document.createElement('div'); a.className = 'aviso'; a.setAttribute('role', 'status'); caixa(a); }
       a.className = 'aviso' + (tipo ? ' ' + tipo : ''); a.textContent = txt; a.hidden = false;
       clearTimeout(avisoT); avisoT = setTimeout(() => { a.hidden = true; }, ms || 2400);
     }
@@ -264,21 +280,28 @@
     mv.addEventListener('pointerup', (e) => {
       const t = toque; toque = null;
       if (!t || !e.isPrimary || Math.hypot(e.clientX - t.x, e.clientY - t.y) > 10 || Date.now() - t.t > 600) return;
-      if (e.target.closest && e.target.closest('.ar, .etq, .tg')) return;
+      if (e.target.closest && e.target.closest('.ar, .etq, .tg, .folha, .fim, .aviso, .hud')) return;
       if (!cena) return;
-      const r = mv.getBoundingClientRect();
+      // Na sala, o ecrã inteiro é a câmara; fora dela, a caixa do modelo.
+      const ndc = emAR ? { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight) * 2 + 1 } : cena.getNDC(e.clientX, e.clientY), tiradas = [];
       // As membranas transparentes (pleura, peritoneu…) não contam: procura-se o que está por trás.
-      const ndc = cena.getNDC(e.clientX, e.clientY), tiradas = [];
       let hit = cena.hitFromPoint(ndc), primeiro = hit;
       while (hit && hit.object.material && hit.object.material.transparent && tiradas.length < 6) { tiradas.push(hit.object); hit.object.visible = false; hit = cena.hitFromPoint(ndc); }
       tiradas.forEach((o) => { o.visible = true; });
       if (!hit) hit = primeiro;
       if (!hit || !hit.face || !hit.object.geometry.attributes._id) { if (!jogo) { cartao.hidden = true; marca(null); } return; }
       const gi = hit.object.geometry.attributes._id.getX(hit.face.a);
-      const pn = mv.positionAndNormalFromPoint(e.clientX, e.clientY);
-      const pos = pn ? { x: pn.position.x, y: pn.position.y, z: pn.position.z, n: [pn.normal.x, pn.normal.y, pn.normal.z].map((v) => Math.round(v * 100) / 100) } : null;
+      // Ponto tocado nas coordenadas do modelo (para a legenda ficar presa à peça, também na sala).
+      let pos = null;
+      try {
+        const q = hit.point.clone().applyMatrix4(cena.target.matrixWorld.clone().invert());
+        const n = hit.face.normal;
+        pos = { x: q.x, y: q.y, z: q.z, n: [n.x, n.y, n.z].map((v) => Math.round(v * 100) / 100) };
+      } catch (er) {
+        const pn = mv.positionAndNormalFromPoint(e.clientX, e.clientY);
+        if (pn) pos = { x: pn.position.x, y: pn.position.y, z: pn.position.z, n: [pn.normal.x, pn.normal.y, pn.normal.z].map((v) => Math.round(v * 100) / 100) };
+      }
       if (jogo) tocouJogo(gi, pos); else tocouPeca(gi, pos);
-      void r;
     });
 
     // Explorar: cartão com o nome.
@@ -308,7 +331,7 @@
       } else if (a === 'tudo') { escondidas.fill(0); mv.cameraTarget = 'auto auto auto'; mv.cameraOrbit = 'auto auto auto'; aplicar(); cartao.hidden = true; marca(null); }
     });
 
-    M.querySelector('.chips').addEventListener('click', (e) => {
+    if (!jogo) M.querySelector('.chips').addEventListener('click', (e) => {
       const b = e.target.closest('[data-sis]'); if (!b) return;
       const k = b.dataset.sis;
       if (ligados.has(k)) { if (soJogo.has(k)) soJogo.delete(k); else ligados.delete(k); }
@@ -326,9 +349,9 @@
     const baralhar = (l) => { for (let i = l.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [l[i], l[j]] = [l[j], l[i]]; } return l; };
     function placar() {
       if (!jogo) return;
-      M.querySelector('.conta').textContent = 'Legendas: ' + feitos.size + ' de ' + leg.length;
       let h = ''; for (let i = 0; i < VIDAS; i++) h += CORACAO(i < VIDAS - erros);
-      M.querySelector('.vidas').innerHTML = h;
+      M.querySelectorAll('.conta').forEach((c) => { c.textContent = 'Legendas: ' + feitos.size + ' de ' + leg.length; });
+      M.querySelectorAll('.vidas').forEach((v) => { v.innerHTML = h; });
     }
     function fecharFolha() { const f = document.querySelector('.folha'); if (f) f.remove(); marca(null); }
     function tocouJogo(gi, pos) {
@@ -348,7 +371,7 @@
       f.innerHTML = '<div class="pega"></div><h4>Que peça é esta?</h4><div class="op">' +
         ops.map((a) => '<button type="button" data-o="' + a + '" aria-pressed="false">' + esc(I.alvos[a].pt) + '</button>').join('') + '</div>' +
         '<div class="bt"><button type="button" data-a="cancelar">Cancelar</button><button type="button" class="p" data-a="por" disabled>Pôr a legenda</button></div>';
-      document.body.appendChild(f);
+      caixa(f);
       let escolha = null;
       f.addEventListener('click', (e) => {
         const o = e.target.closest('[data-o]');
@@ -372,7 +395,7 @@
     function fim(html) {
       const f = document.createElement('div');
       f.className = 'fim'; f.innerHTML = '<div role="alertdialog" aria-modal="true">' + html + '</div>';
-      document.body.appendChild(f);
+      caixa(f);
       return f;
     }
     function ganhou() {
@@ -384,6 +407,7 @@
     }
     function perdeu() {
       acabou = true;
+      const av = document.querySelector('.aviso'); if (av) av.hidden = true;
       const f = fim(PERDEU + '<h2>Perdeu!</h2><p>Errou ' + VIDAS + ' vezes.</p><p>Tem de recomeçar a legendagem.</p><button type="button" data-a="re">Recomeçar</button>');
       f.addEventListener('click', (e) => { if (e.target.closest('[data-a="re"]')) { f.remove(); recomecar(); } });
     }
