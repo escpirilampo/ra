@@ -25,6 +25,7 @@
   .ar { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 14px 16px 8px; height: 58px; border: 0; border-radius: 16px; background: var(--laranja); color: #fff; font: 700 19px inherit; font-family: inherit; width: calc(100% - 32px); }
   .ar svg { width: 24px; height: 24px; }
   .sem-ar { margin: 10px 16px; padding: 12px 14px; border-radius: 12px; background: #FFF7ED; border: 1px solid #FED7AA; font-size: 14px; line-height: 1.4; }
+  .sem-ar .copiar { margin-top: 10px; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #FDBA74; background: #fff; font: 600 14px inherit; font-family: inherit; }
   .fonte { margin: 8px 16px calc(18px + env(safe-area-inset-bottom)); text-align: center; font-size: 11.5px; color: #8A8F99; line-height: 1.4; }
   .erro { margin: 40px 20px; text-align: center; line-height: 1.5; }
   /* Lista (página inicial) */
@@ -98,10 +99,28 @@
     const bt = mv.querySelector('.ar');
     mv.addEventListener('load', () => {
       if (mv.canActivateAR) { M.insertBefore(bt, mv.nextSibling); bt.addEventListener('click', () => mv.activateAR()); }
-      else { bt.remove(); M.querySelector('.sem-ar').hidden = false; }
+      else { bt.remove(); semAR(); }
     }, { once: true });
     mv.addEventListener('error', () => { M.insertAdjacentHTML('afterbegin', '<p class="erro">Não foi possível abrir o modelo. Verifique a ligação à internet.</p>'); });
-    mv.addEventListener('ar-status', (e) => { if (e.detail.status === 'failed') M.querySelector('.sem-ar').hidden = false; });
+    mv.addEventListener('ar-status', (e) => { if (e.detail.status === 'failed') semAR(); });
+    // Sem realidade aumentada: muitas vezes é por a página ter aberto dentro de outra app (leitor de QR, WhatsApp,
+    // Google…). No iPhone só o Safari a faz; no Android, o Chrome.
+    function semAR() {
+      const caixa = M.querySelector('.sem-ar'), ua = navigator.userAgent;
+      const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+      const android = /Android/.test(ua);
+      const outraApp = ios ? !/Safari\//.test(ua) || /CriOS|FxiOS|EdgiOS|GSA\/|FBAN|FBAV|Instagram|WhatsApp/.test(ua) : android && (/; wv\)|FBAN|FBAV|Instagram|WhatsApp|GSA\//.test(ua) || !/Chrome\//.test(ua));
+      caixa.innerHTML = outraApp
+        ? '<b>Para pôr o modelo na sala, abra esta página no ' + (ios ? 'Safari' : 'Chrome') + '.</b><br>' +
+          (ios ? 'Toque em <b>Partilhar</b> (ou nos três pontos) e escolha «Abrir no Safari», ou leia o código QR com a app <b>Câmara</b> do iPhone.'
+               : 'Toque nos três pontos e escolha «Abrir no Chrome», ou leia o código QR com a câmara do telemóvel.') +
+          '<br><button type="button" class="copiar">Copiar o endereço</button>'
+        : 'Este aparelho não consegue pôr o modelo na sala (realidade aumentada). Pode na mesma rodá-lo e aproximá-lo com os dedos.' +
+          (android ? ' No Android, precisa da app «Google Play Services para RA» e do Chrome.' : '');
+      caixa.hidden = false;
+      const c = caixa.querySelector('.copiar');
+      if (c) c.addEventListener('click', async () => { try { await navigator.clipboard.writeText(location.href); c.textContent = 'Endereço copiado'; } catch (e) { c.textContent = location.href; } });
+    }
   } catch (e) {
     M.innerHTML = '<p class="erro">Não foi possível abrir a página. Verifique a ligação à internet.</p>';
   }
