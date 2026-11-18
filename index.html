@@ -472,14 +472,19 @@
   function quickLook(mv, bt, versao) {
     if (!IOS) { bt.addEventListener('click', () => mv.activateAR()); return () => {}; }
     const original = Object.getPrototypeOf(mv).prepareUSDZ;
-    let url = null, pronto = -1, aPreparar = null, pendente = false;
+    // Guarda-se o ficheiro (Blob) e dá-se um endereço novo a cada abertura: o model-viewer apaga o endereço
+    // logo a seguir a abrir a sala, e a segunda vez falhava.
+    let blob = null, url = null, pronto = -1, aPreparar = null, pendente = false;
     const texto = bt.innerHTML;
-    mv.prepareUSDZ = async () => url;
+    mv.prepareUSDZ = async () => URL.createObjectURL(blob);
     async function preparar() {
       if (aPreparar) { pendente = true; return aPreparar; }
       const v = versao();
       aPreparar = (async () => {
-        try { const u = await original.call(mv); if (url) URL.revokeObjectURL(url); url = u; pronto = v; } catch (e) { console.warn('usdz', e); }
+        try {
+          const u = await original.call(mv);
+          blob = await (await fetch(u)).blob(); URL.revokeObjectURL(u); url = true; pronto = v;
+        } catch (e) { console.warn('usdz', e); }
         aPreparar = null;
         if (pendente) { pendente = false; preparar(); }
       })();
@@ -552,7 +557,7 @@
     // O botão «Ver na sala» fica por baixo do modelo (mais fácil de tocar); só aparece se o aparelho tiver RA.
     const bt = mv.querySelector('.ar');
     mv.addEventListener('load', () => {
-      if (mv.canActivateAR) { M.insertBefore(bt, mv.nextSibling); quickLook(mv, bt, () => 0)(); }
+      if (mv.canActivateAR) { M.insertBefore(bt, mv.nextSibling); bt.addEventListener('click', () => mv.activateAR()); }
       else { bt.remove(); semAR(); }
     }, { once: true });
     mv.addEventListener('error', () => { M.insertAdjacentHTML('afterbegin', '<p class="erro">Não foi possível abrir o modelo. Verifique a ligação à internet.</p>'); });
