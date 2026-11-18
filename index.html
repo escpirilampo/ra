@@ -35,6 +35,8 @@
   .lista a span small { display: block; color: var(--suave); font-size: 12.5px; margin-top: 2px; }
   .procura { margin: 10px 12px 0; width: calc(100% - 24px); height: 46px; border-radius: 12px; border: 1px solid var(--linha); padding: 0 14px; font: 16px inherit; font-family: inherit; }
 
+  /* Puxar o modelo para baixo não recarrega a página (telemóveis). */
+  html, body { overscroll-behavior-y: none; }
   /* Corpo humano inteiro: sistemas, nomes e «Legendar» */
   .cena { position: relative; }
   .cena model-viewer { display: block; }
@@ -153,7 +155,7 @@
     M.innerHTML =
       '<h1 style="margin-top:4px">' + titulo + '</h1><p class="sub">' + (jogo ? 'Toque numa peça e escolha o nome' : 'Escolha os sistemas · toque numa peça para ver o nome') + '</p>' +
       (jogo ? '<div class="estado"><span class="conta"></span><span class="vidas" aria-label="Vidas"></span></div>' : '') +
-      '<div class="cena"><model-viewer src="m/corpo/inteiro.glb" alt="Corpo humano" camera-controls touch-action="pan-y" shadow-intensity="0" exposure="1.05" environment-image="neutral"' +
+      '<div class="cena"><model-viewer src="m/corpo/inteiro.glb" alt="Corpo humano" camera-controls touch-action="none" shadow-intensity="0" exposure="1.05" environment-image="neutral"' +
         ' min-camera-orbit="auto auto 0.2m" camera-orbit="0deg 82deg auto" disable-tap interpolation-decay="120"' +
         ' ar ar-modes="webxr scene-viewer quick-look" ar-scale="auto" ar-placement="floor" interaction-prompt="none">' +
         '<button slot="ar-button" class="ar" type="button">' + AR + 'Ver na sala</button>' +
@@ -419,6 +421,11 @@
         }
       });
     }
+    // A meio do jogo, sair ou recarregar a página pede confirmação (Android/computador; o iPhone não deixa perguntar).
+    window.addEventListener('beforeunload', (e) => {
+      if (!jogo || acabou || (feitos.size === 0 && erros === 0)) return;
+      e.preventDefault(); e.returnValue = '';
+    });
     function fim(html) {
       const f = document.createElement('div');
       f.className = 'fim'; f.innerHTML = '<div role="alertdialog" aria-modal="true">' + html + '</div>';
