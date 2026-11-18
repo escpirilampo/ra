@@ -188,25 +188,52 @@
       cena.traverse((o) => {
         if (!o.isMesh || !o.geometry || !o.geometry.attributes._id) return;
         let p = o; while (p && !/^sis-/.test(p.name || '')) p = p.parent;
-        const pos = o.geometry.attributes.position;
-        malhas.push({ o, sis: p ? p.name.slice(4) : '', ids: o.geometry.attributes._id.array, pos, orig: pos.array.slice() });
+        malhas.push({ o, sis: p ? p.name.slice(4) : '', g0: o.geometry, ids: o.geometry.attributes._id.array });
       });
     }
-    // Põe à vista o que deve estar: sistemas ligados, sem as peças escondidas (que ficam reduzidas a um ponto).
+    // Põe à vista o que deve estar: sistemas ligados e, neles, só as peças que não estão escondidas.
+    // As peças escondidas saem mesmo da malha (fica mais leve para mostrar e para levar para a sala no iPhone).
+    let estado = 0, prepararIOS = () => {};
     function aplicar() {
       if (!cena) return;
+      estado++;
       for (const m of malhas) {
         const vis = ligados.has(m.sis);
         m.o.visible = vis;
         if (!vis) continue;
-        const parcial = soJogo.has(m.sis), a = m.pos.array, o = m.orig, ids = m.ids;
-        for (let v = 0, n = ids.length; v < n; v++) {
-          const g = ids[v], k = v * 3;
-          if (escondidas[g] || (parcial && !doJogo[g])) { a[k] = a[k + 1] = a[k + 2] = 0; }
-          else { a[k] = o[k]; a[k + 1] = o[k + 1]; a[k + 2] = o[k + 2]; }
+        const parcial = soJogo.has(m.sis), ids = m.ids;
+        const fica = (g) => !(escondidas[g] || (parcial && !doJogo[g]));
+        let todas = true;
+        for (let v = 0; v < ids.length && todas; v++) if (!fica(ids[v])) todas = false;
+        const antes = m.o.geometry;
+        if (todas) m.o.geometry = m.g0;
+        else {
+          const g0 = m.g0, A = g0.attributes, ind = g0.index.array, novo = new Int32Array(ids.length).fill(-1);
+          const P = A.position.array, Nn = A.normal ? A.normal.array : null, idx = [];
+          let nv = 0;
+          for (let t = 0; t < ind.length; t += 3) {
+            const a = ind[t], b = ind[t + 1], c = ind[t + 2];
+            if (!fica(ids[a]) || !fica(ids[b]) || !fica(ids[c])) continue;
+            for (const v of [a, b, c]) { if (novo[v] < 0) novo[v] = nv++; idx.push(novo[v]); }
+          }
+          const p2 = new Float32Array(nv * 3), n2 = Nn ? new Float32Array(nv * 3) : null, i2 = new ids.constructor(nv);
+          for (let v = 0; v < novo.length; v++) {
+            const w = novo[v]; if (w < 0) continue;
+            p2[w * 3] = P[v * 3]; p2[w * 3 + 1] = P[v * 3 + 1]; p2[w * 3 + 2] = P[v * 3 + 2];
+            if (n2) { n2[w * 3] = Nn[v * 3]; n2[w * 3 + 1] = Nn[v * 3 + 1]; n2[w * 3 + 2] = Nn[v * 3 + 2]; }
+            i2[w] = ids[v];
+          }
+          const G = new g0.constructor(), BA = A.position.constructor;
+          G.setAttribute('position', new BA(p2, 3));
+          if (n2) G.setAttribute('normal', new BA(n2, 3));
+          G.setAttribute('_id', new A._id.constructor(i2, 1));
+          G.setIndex(new g0.index.constructor(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+          G.computeBoundingSphere(); G.computeBoundingBox();
+          m.o.geometry = G;
         }
-        m.pos.needsUpdate = true;
+        if (antes !== m.g0 && antes !== m.o.geometry) antes.dispose();
       }
+      prepararIOS();
       M.querySelectorAll('.chips button').forEach((b) => b.setAttribute('aria-pressed', ligados.has(b.dataset.sis)));
       if (cena.queueRender) cena.queueRender();
       nomes();
@@ -428,7 +455,7 @@
         mv.cameraOrbit = '0deg 82deg ' + r.toFixed(2) + 'm';
         mv.jumpCameraToGoal();
       }
-      if (mv.canActivateAR) { M.querySelector('.cena').insertAdjacentElement('afterend', bt); bt.addEventListener('click', () => mv.activateAR()); }
+      if (mv.canActivateAR) { M.querySelector('.cena').insertAdjacentElement('afterend', bt); prepararIOS = quickLook(mv, bt, () => estado); prepararIOS(); }
       else { bt.remove(); semAR(); }
       if (jogo) aviso('Encontre e legende ' + leg.length + ' peças. Pode errar ' + VIDAS + ' vezes.', '', 3200);
     }, { once: true });
@@ -438,6 +465,38 @@
 
     // Android: se a realidade aumentada do Chrome (WebXR) falhar ou fechar logo, oferece o visualizador do Android
     // (Scene Viewer, a app da Google), que funciona em mais telemóveis.
+  // iPhone/iPad: o «Ver na sala» (Quick Look) precisa do modelo já convertido no momento do toque; com modelos
+  // grandes a conversão demorava e o iPhone ignorava o toque. Converte-se antes (em segundo plano) e, se ainda não
+  // estiver pronto, o botão diz «A preparar…» e depois «Abrir na sala».
+  const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function quickLook(mv, bt, versao) {
+    if (!IOS) { bt.addEventListener('click', () => mv.activateAR()); return () => {}; }
+    const original = Object.getPrototypeOf(mv).prepareUSDZ;
+    let url = null, pronto = -1, aPreparar = null, pendente = false;
+    const texto = bt.innerHTML;
+    mv.prepareUSDZ = async () => url;
+    async function preparar() {
+      if (aPreparar) { pendente = true; return aPreparar; }
+      const v = versao();
+      aPreparar = (async () => {
+        try { const u = await original.call(mv); if (url) URL.revokeObjectURL(url); url = u; pronto = v; } catch (e) { console.warn('usdz', e); }
+        aPreparar = null;
+        if (pendente) { pendente = false; preparar(); }
+      })();
+      return aPreparar;
+    }
+    bt.addEventListener('click', async () => {
+      if (pronto === versao() && url) { bt.innerHTML = texto; mv.activateAR(); return; }
+      bt.disabled = true; bt.textContent = 'A preparar…';
+      await preparar();
+      while (aPreparar) await aPreparar;
+      bt.disabled = false;
+      bt.innerHTML = texto.replace('Ver na sala', 'Abrir na sala');
+    });
+    let t = 0;
+    return () => { clearTimeout(t); t = setTimeout(preparar, 900); };
+  }
+
   function arAndroid(mv) {
     let inicio = 0, colocado = false;
     mv.addEventListener('ar-status', (e) => {
@@ -493,7 +552,7 @@
     // O botão «Ver na sala» fica por baixo do modelo (mais fácil de tocar); só aparece se o aparelho tiver RA.
     const bt = mv.querySelector('.ar');
     mv.addEventListener('load', () => {
-      if (mv.canActivateAR) { M.insertBefore(bt, mv.nextSibling); bt.addEventListener('click', () => mv.activateAR()); }
+      if (mv.canActivateAR) { M.insertBefore(bt, mv.nextSibling); quickLook(mv, bt, () => 0)(); }
       else { bt.remove(); semAR(); }
     }, { once: true });
     mv.addEventListener('error', () => { M.insertAdjacentHTML('afterbegin', '<p class="erro">Não foi possível abrir o modelo. Verifique a ligação à internet.</p>'); });
