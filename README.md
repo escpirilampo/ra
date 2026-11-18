@@ -9,4 +9,7 @@ Não há código do programa, nem contas, nem dados da escola ou dos alunos.
 
 Endereço: `https://escpirilampo.github.io/ra/?m=seres/si-108` (categoria/modelo).
 
+Corpo humano inteiro: `?m=corpo/inteiro` (sistemas, nomes das peças). Jogo «Legendar»: `?m=corpo/inteiro&leg=figado,estomago,…`
+(as peças escolhidas pelo professor; o aluno pode errar três vezes). Nada do jogo fica guardado nem é enviado.
+
 Licenças: ver [LICENCAS.md](LICENCAS.md).
