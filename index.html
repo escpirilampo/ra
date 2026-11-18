@@ -102,7 +102,23 @@
       else { bt.remove(); semAR(); }
     }, { once: true });
     mv.addEventListener('error', () => { M.insertAdjacentHTML('afterbegin', '<p class="erro">Não foi possível abrir o modelo. Verifique a ligação à internet.</p>'); });
-    mv.addEventListener('ar-status', (e) => { if (e.detail.status === 'failed') semAR(); });
+    // Android: se a realidade aumentada do Chrome (WebXR) falhar ou fechar logo, oferece o visualizador do Android
+    // (Scene Viewer, a app da Google), que funciona em mais telemóveis.
+    let inicio = 0, colocado = false;
+    mv.addEventListener('ar-status', (e) => {
+      const st = e.detail.status;
+      if (st === 'session-started') { inicio = Date.now(); colocado = false; }
+      else if (st === 'object-placed') colocado = true;
+      else if (st === 'failed' || (st === 'not-presenting' && inicio && !colocado && Date.now() - inicio < 5000)) {
+        inicio = 0;
+        if (/Android/.test(navigator.userAgent) && mv.getAttribute('ar-modes') !== 'scene-viewer') {
+          const c = M.querySelector('.sem-ar');
+          c.innerHTML = 'A realidade aumentada do Chrome fechou. Experimente o visualizador do Android:<br><button type="button" class="copiar outro">Ver na sala com o visualizador do Android</button>';
+          c.hidden = false;
+          c.querySelector('.outro').addEventListener('click', () => { mv.setAttribute('ar-modes', 'scene-viewer'); setTimeout(() => mv.activateAR(), 50); });
+        } else if (st === 'failed') semAR();
+      }
+    });
     // Sem realidade aumentada: muitas vezes é por a página ter aberto dentro de outra app (leitor de QR, WhatsApp,
     // Google…). No iPhone só o Safari a faz; no Android, o Chrome.
     function semAR() {
