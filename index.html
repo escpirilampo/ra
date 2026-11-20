@@ -54,6 +54,10 @@
   .etq:not([data-visible]), .etq.tapa { opacity: 0; }
   .etq.ok::before { border-color: #16A34A; } .etq.ok span { border: 2px solid #16A34A; }
   .etq.toque::before { background: var(--laranja); border-color: #fff; }
+  /* Pista do jogo: ao fim de 5 s sem tocar, uma peça por legendar acende (e um anel pulsa por cima). */
+  .etq.pista { width: 22px; height: 22px; } .etq.pista span { display: none; }
+  .etq.pista::before { background: rgba(249,115,22,.35); border: 3px solid var(--laranja); animation: pista 1.1s ease-in-out infinite; }
+  @keyframes pista { 0%, 100% { transform: scale(.8); opacity: 1; } 50% { transform: scale(1.6); opacity: .45; } }
   .cartao { margin: 10px 12px 0; background: #fff; border: 1px solid var(--linha); border-radius: 16px; padding: 12px 14px; }
   .cartao b { font-size: 17px; } .cartao small { display: block; color: var(--suave); font-size: 13px; margin-top: 2px; }
   .cartao p { margin: 8px 0 0; font-size: 14px; line-height: 1.45; }
@@ -315,9 +319,11 @@
       const ndc = emAR ? { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight) * 2 + 1 } : cena.getNDC(e.clientX, e.clientY), tiradas = [];
       // As membranas transparentes (pleura, peritoneu…) não contam: procura-se o que está por trás.
       let hit = cena.hitFromPoint(ndc), primeiro = hit;
-      while (hit && hit.object.material && hit.object.material.transparent && tiradas.length < 6) { tiradas.push(hit.object); hit.object.visible = false; hit = cena.hitFromPoint(ndc); }
+      while (hit && hit.object.material && hit.object.material.transparent && !(hit.object.userData && hit.object.userData.pista) && tiradas.length < 6) { tiradas.push(hit.object); hit.object.visible = false; hit = cena.hitFromPoint(ndc); }
       tiradas.forEach((o) => { o.visible = true; });
       if (!hit) hit = primeiro;
+      // O brilho da pista é uma cópia por cima (mesmos vértices): conta como tocar na própria peça.
+      if (hit && hit.object.userData && hit.object.userData.pista) hit = { object: hit.object.parent, face: hit.face, point: hit.point };
       if (!hit || !hit.face || !hit.object.geometry.attributes._id) { if (!jogo) { cartao.hidden = true; marca(null); } return; }
       const gi = hit.object.geometry.attributes._id.getX(hit.face.a);
       // Ponto tocado nas coordenadas do modelo (para a legenda ficar presa à peça, também na sala).
@@ -383,7 +389,67 @@
       M.querySelectorAll('.vidas').forEach((v) => { v.innerHTML = h; });
     }
     function fecharFolha() { const f = document.querySelector('.folha'); if (f) f.remove(); marca(null); }
+
+    // Pista: 5 s sem tocar numa peça, uma das peças ainda por legendar acende (brilho laranja a pulsar)
+    // até o aluno tocar. A seguinte pista é outra peça.
+    const PISTA_MS = 5000;
+    let ultimoToque = Date.now(), pista = null, pistaN = 0;
+    function tirarPista() {
+      if (!pista) return;
+      cancelAnimationFrame(pista.raf);
+      pista.malhas.forEach((x) => { x.parent && x.parent.remove(x); x.geometry.dispose(); x.material.dispose(); });
+      if (pista.anel) pista.anel.remove();
+      pista = null;
+      if (cena && cena.queueRender) cena.queueRender();
+    }
+    function porPista() {
+      const falta = leg.filter((a) => !feitos.has(a));
+      if (!falta.length || !cena) return;
+      const alvo = falta[pistaN++ % falta.length], x = I.alvos[alvo], quer = new Set(x.pecas);
+      const novas = [];
+      for (const m of malhas) {
+        if (!m.o.visible || m.sis !== x.sis) continue;
+        const G = m.o.geometry, ids = G.attributes._id && G.attributes._id.array, ind = G.index && G.index.array;
+        if (!ids || !ind) continue;
+        const tri = [];
+        for (let t = 0; t < ind.length; t += 3) if (quer.has(ids[ind[t]]) && quer.has(ids[ind[t + 1]]) && quer.has(ids[ind[t + 2]])) tri.push(ind[t], ind[t + 1], ind[t + 2]);
+        if (!tri.length) continue;
+        const G2 = new G.constructor();
+        G2.setAttribute('position', G.attributes.position);
+        if (G.attributes.normal) G2.setAttribute('normal', G.attributes.normal);
+        const maior = G.attributes.position.count > 65535;
+        G2.setIndex(new G.index.constructor(maior ? new Uint32Array(tri) : new Uint16Array(tri), 1));
+        G2.computeBoundingSphere();
+        const mat = (Array.isArray(m.o.material) ? m.o.material[0] : m.o.material).clone();
+        if (mat.color) mat.color.setHex(0xF97316);
+        if (mat.emissive) mat.emissive.setHex(0xF97316);
+        mat.transparent = true; mat.opacity = 1; mat.depthWrite = false;
+        mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -4;
+        const brilho = new m.o.constructor(G2, mat);
+        brilho.renderOrder = 10; brilho.userData.pista = true;
+        m.o.add(brilho);
+        novas.push(brilho);
+      }
+      const anel = etiqueta({ x: x.p[0], y: x.p[1], z: x.p[2], n: x.n }, '', 'pista');
+      pista = { malhas: novas, anel, raf: 0 };
+      const t0 = performance.now();
+      const pulsar = (t) => {
+        if (!pista) return;
+        const k = 0.5 + 0.5 * Math.sin((t - t0) / 1000 * Math.PI * 1.8);
+        pista.malhas.forEach((b) => { b.material.opacity = 0.35 + 0.6 * k; if (b.material.emissive) b.material.emissiveIntensity = 0.4 + 0.9 * k; });
+        if (cena.queueRender) cena.queueRender();
+        pista.raf = requestAnimationFrame(pulsar);
+      };
+      pista.raf = requestAnimationFrame(pulsar);
+    }
+    if (jogo) setInterval(() => {
+      // Enquanto a escolha do nome está aberta (ou o jogo acabou), não conta como tempo parado.
+      if (acabou || !cena || document.querySelector('.folha, .fim')) { ultimoToque = Date.now(); return; }
+      if (!pista && Date.now() - ultimoToque >= PISTA_MS) porPista();
+    }, 400);
+
     function tocouJogo(gi, pos) {
+      ultimoToque = Date.now(); tirarPista();
       if (acabou) return;
       const alvo = leg.find((a) => I.alvos[a].pecas.indexOf(gi) >= 0);
       if (!alvo) { aviso('Esta peça não faz parte do exercício. Procure outra.'); return; }
@@ -446,7 +512,7 @@
       f.addEventListener('click', (e) => { if (e.target.closest('[data-a="re"]')) { f.remove(); recomecar(); } });
     }
     function recomecar() {
-      feitos = new Set(); erros = 0; acabou = false;
+      feitos = new Set(); erros = 0; acabou = false; tirarPista(); ultimoToque = Date.now();
       mv.querySelectorAll('.etq.legenda').forEach((b) => b.remove());
       fecharFolha(); placar();
       aviso('Novo jogo: ' + leg.length + ' legendas, pode errar ' + VIDAS + ' vezes.', '', 2600);
